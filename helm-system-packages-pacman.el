@@ -62,6 +62,29 @@
         (push (cons (intern (match-string 1)) (match-string 2)) descs))
       descs)))
 
+(defun helm-system-packages-pacman-refresh ()
+  "Refresh callback."
+  (setq helm-system-packages--all (or helm-system-packages--all
+                                      (if helm-system-packages-details-flag
+                                          ;;   (setq display (concat
+                                          ;;                  ;; TODO: Move this to cache instead?
+                                          ;;                  (substring display 0 (min (length display) helm-system-packages-max-length))
+                                          ;;                  (make-string (max (- helm-system-packages-max-length (length display)) 0) ? )
+                                          ;;                  (or (and (> (length display) helm-system-packages-max-length) helm-buffers-end-truncated-string) " ")
+                                          ;;                  " "
+                                          ;;                  (alist-get (intern pkg) helm-system-packages--descriptions))))
+                                          (mapconcat (lambda (pkg) (concat (symbol-name (car pkg)) "   " (cdr pkg)))
+                                                     (helm-system-packages-pacman-list-descriptions) "\n")
+                                        (mapconcat 'identity (helm-system-packages-pacman-list-all) "\n"))))
+  (let* ((explicit (helm-system-packages-pacman-list-explicit))
+         (dependencies (helm-system-packages-pacman-list-dependencies))
+         (uninstalled (seq-difference (seq-difference (helm-system-packages-pacman-list-all) explicit) dependencies)))
+    (setq helm-system-packages--display-lists
+          (list
+           (cons explicit 'helm-system-packages-explicit)
+           (cons dependencies 'helm-system-packages-dependencies)
+           (cons uninstalled nil)))))
+
 (defvar helm-system-packages-pacman-source
   (helm-build-in-buffer-source "pacman source"
     :init 'helm-system-packages-init

@@ -31,10 +31,22 @@
 (defvar helm-system-packages-eshell-buffer "*helm-system-packages-eshell*")
 (defvar helm-system-packages-buffer "*helm-system-packages-output*")
 
-(defvar helm-system-packages--explicit nil)
-(defvar helm-system-packages--dependencies nil)
-(defvar helm-system-packages--all nil)
-(defvar helm-system-packages--descriptions nil)
+(defvar helm-system-packages--all nil
+  "String of all packages.")
+
+;; TODO: Split into two functions?
+(defvar helm-system-packages-refresh nil
+  "Function to refresh the manager state.
+It is called:
+- On each session start if helm-system-packages--all is nil.
+- Whenever a shell command completes.
+This must set `helm-system-packages--all' if nil.")
+
+(defvar helm-system-packages--display-lists nil
+  "List of ((packages...) . face).
+
+Example:
+TODO: Add example.")
 
 (defface helm-system-packages-explicit '((t (:foreground "orange" :weight bold)))
   "Face for excplitly installed packages."
@@ -66,27 +78,19 @@
   :group 'helm-system-packages
   :type 'integerp)
 
-;; TODO: Match over description as well.
+;; TODO: Rename "highlight" to something else.  "display"?
+;; TODO: Propertize the cache directly.
 (defun helm-system-packages-highlight (packages)
-  "Highlight all explicitly installed PACKAGES as well as dependencies."
-  (mapcar (lambda (pkg)
-            (let (display)
-              (setq display
-                    (propertize pkg 'face
-                                (cond
-                                 ((member pkg helm-system-packages--explicit) 'helm-system-packages-explicit)
-                                 ((member pkg helm-system-packages--dependencies) 'helm-system-packages-dependencies)
-                                 (t nil))))
-              (when helm-system-packages-details-flag
-                (setq display (concat
-                               ;; TODO: Move this to cache instead?
-                               (substring display 0 (min (length display) helm-system-packages-max-length))
-                               (make-string (max (- helm-system-packages-max-length (length display)) 0) ? )
-                               (or (and (> (length display) helm-system-packages-max-length) helm-buffers-end-truncated-string) " ")
-                               " "
-                               (alist-get (intern pkg) helm-system-packages--descriptions))))
-              (cons display pkg)))
-          packages))
+  "Display PACKAGES using the content of `helm-system-packages--display-lists'."
+  (let (res)
+    (dolist (pkg packages res)
+      (let ((helm-system-packages--display-lists helm-system-packages--display-lists))
+        (while (and helm-system-packages--display-lists
+                    (not (member (car (split-string pkg)) (caar helm-system-packages--display-lists))))
+          (setq helm-system-packages--display-lists (cdr helm-system-packages--display-lists)))
+        ;; (message "HELM %S, %S" pkg (length helm-system-packages--display-lists))
+        (when helm-system-packages--display-lists
+          (push (propertize pkg 'face (cdar helm-system-packages--display-lists)) res))))))
 
 (defun helm-system-packages-run (command &rest args)
   "COMMAND to run over `helm-marked-candidates'."
@@ -157,29 +161,19 @@ With prefix argument, insert the output at point."
    (helm-current-prefix-arg (insert urls))
    (t (mapc 'browse-url (helm-comp-read "URL: " urls :must-match t :exec-when-only-one t :marked-candidates t)))))
 
-(defun helm-system-packages-refresh (&optional lazy)
-  "Cache package lists.
-
-There is no need to call this function unless the set of system
-packages was changed externally, e.g. via a system upgrade.
-
-With prefix argument or if LAZY is non-nil, only do it if the
-lists have not already been set."
-  (interactive "P")
-  (dolist (cache '(helm-system-packages--explicit
-                   helm-system-packages--dependencies
-                   helm-system-packages--all
-                   helm-system-packages--descriptions))
-    (set cache (or (and lazy (symbol-value cache))
-                   (and (functionp cache) (funcall cache))))))
-
+;; TODO: Find name that makes more sense interactively.
 (defun helm-system-packages-init ()
   "Cache package lists and create Helm buffer."
-  (helm-system-packages-refresh t)
-  (unless (helm-candidate-buffer)
-    (helm-init-candidates-in-buffer
-        'global
-      helm-system-packages--all)))
+  (interactive)
+  (when (or (not helm-system-packages--all) (called-interactively-p 'interactive))
+    (setq helm-system-packages--all nil)
+    (helm-system-packages-refresh))
+  ;; TODO: We should only create the buffer if it does not already exist.
+  ;; On the other hand, we need to be able to override the package list.
+  ;; (unless (helm-candidate-buffer) ...
+  (helm-init-candidates-in-buffer
+      'global
+    helm-system-packages--all))
 
 ;;;###autoload
 (defun helm-system-packages ()
@@ -192,10 +186,7 @@ lists have not already been set."
         (message "No supported package manager was found")
       (let ((manager (car managers)))
         (require (intern (concat "helm-system-packages-" manager)))
-        (fset 'helm-system-packages--explicit (intern (concat "helm-system-packages-" manager "-list-explicit")))
-        (fset 'helm-system-packages--dependencies (intern (concat "helm-system-packages-" manager "-list-dependencies")))
-        (fset 'helm-system-packages--all (intern (concat "helm-system-packages-" manager "-list-all")))
-        (fset 'helm-system-packages--descriptions (intern (concat "helm-system-packages-" manager "-list-descriptions")))
+        (fset 'helm-system-packages-refresh (intern (concat "helm-system-packages-" manager "-refresh")))
         (funcall (intern (concat "helm-system-packages-" manager)))))))
 
 (provide 'helm-system-packages)
